@@ -1,0 +1,5 @@
+ultralytics==8.0.20
+opencv-python
+pytesseract
+deep_sort_realtime
+numpy
