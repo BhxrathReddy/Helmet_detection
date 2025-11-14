@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Model files (large files - uncomment if you don't want to track them)
+# *.pt
+# models/*.pt
+
+# Output files
+output/
+violations/
+
+# Training outputs
+runs/
+models/*/weights/
+models/helmet_detection/
+
+# Data files (uncomment if you don't want to track videos)
+# data/videos/*.mp4
+# data/videos/*.avi
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Logs
+*.log
+

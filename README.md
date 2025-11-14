@@ -2,23 +2,49 @@
 
 ## Features
 - Detects motorbike riders without helmets using YOLOv8
-- Tracks vehicles with Deep SORT to avoid duplicate captures
+- Tracks vehicles using license plate OCR to avoid duplicate captures
 - Detects and OCRs license plates using YOLO + Tesseract
 - Saves violation frames only once per unique vehicle
 
+## Project Structure
+```
+Helmet_detection/
+├── src/              # Source code
+│   ├── predict.py   # Main inference script
+│   └── train.py     # Training script
+├── models/          # Model files (.pt)
+├── data/            # Data files
+│   └── videos/      # Input videos
+├── config/          # Configuration files
+│   ├── helmet.yaml  # Dataset config for training
+│   └── classes.txt  # Class names
+├── output/          # Output directory
+│   └── violations/  # Saved violation images
+└── requirements.txt
+```
+
 ## Requirements
 Install dependencies:
-```
+```bash
 pip install -r requirements.txt
 ```
 
 ## Usage
 
-1. Place trained models in `models/`
-2. Put your input video as `input_video.mp4` in the root directory
-3. Run:
+### Training
+1. Prepare your dataset and update `config/helmet.yaml` with the correct paths
+2. Run training:
+```bash
+python src/train.py
 ```
-python src/detect_and_track.py
+Trained model will be saved in `models/helmet_detection/weights/best.pt`
+
+### Inference
+1. Place your trained model as `models/best.pt` (or update the path in `src/predict.py`)
+2. Put your input video in `data/videos/` (default: `hd.mp4`)
+3. Run:
+```bash
+python src/predict.py
 ```
 
-Violation images and number plates will be saved in `violations/`
+Violation images will be saved in `output/violations/`
