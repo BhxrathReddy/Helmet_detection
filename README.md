@@ -22,9 +22,11 @@ Helmet_detection/
 │   ├── __init__.py
 │   ├── predict.py           # Main inference script
 │   ├── train.py             # Training script
+│   ├── batch_process.py     # Batch processing script
 │   ├── detector.py          # Detection logic module
 │   ├── config.py            # Configuration management
-│   └── utils.py             # Utility functions
+│   ├── utils.py             # Utility functions
+│   └── violation_tracker.py # Violation tracking and export
 ├── models/                  # Model files (.pt)
 │   ├── yolov8m.pt          # Pre-trained base models
 │   ├── yolov8n.pt
@@ -132,6 +134,9 @@ python src/predict.py \
 - `--config`: Path to YAML configuration file
 - `--log-level`: Logging level (DEBUG, INFO, WARNING, ERROR)
 - `--log-file`: Path to log file (optional)
+- `--export-csv`: Export violations to CSV file
+- `--export-json`: Export violations to JSON file
+- `--export-report`: Export summary report to text file
 
 #### Using Configuration File
 
@@ -174,12 +179,64 @@ See `config/inference_config.yaml` for all available inference parameters.
 
 ## Output
 
+### Violation Images
+
 Violation images are saved in the output directory with the format:
 ```
 {license_plate}_frame{frame_number}.jpg
 ```
 
 Example: `ABC123_frame1523.jpg`
+
+### Export Violations
+
+Export violations with metadata to CSV, JSON, or text report:
+
+```bash
+# Export to CSV
+python src/predict.py --video data/videos/hd.mp4 --export-csv violations.csv
+
+# Export to JSON
+python src/predict.py --video data/videos/hd.mp4 --export-json violations.json
+
+# Export summary report
+python src/predict.py --video data/videos/hd.mp4 --export-report report.txt
+
+# Export all formats
+python src/predict.py --video data/videos/hd.mp4 \
+    --export-csv violations.csv \
+    --export-json violations.json \
+    --export-report report.txt
+```
+
+**Export formats include:**
+- License plate text
+- Frame number
+- Timestamp (HH:MM:SS.mmm)
+- Image path
+- Detection confidence
+- Detection date/time
+
+### Batch Processing
+
+Process multiple videos at once:
+
+```bash
+python src/batch_process.py \
+    --input-dir data/videos \
+    --model models/best.pt \
+    --output-dir output/violations \
+    --export-csv batch_violations.csv \
+    --export-json batch_violations.json
+```
+
+**Batch Processing Options:**
+- `--input-dir`: Directory containing input videos
+- `--model`: Path to YOLO model file
+- `--output-dir`: Output directory for violation images
+- `--conf`: Confidence threshold (default: 0.3)
+- `--export-csv`: Export all violations to CSV
+- `--export-json`: Export all violations to JSON
 
 ## Logging
 

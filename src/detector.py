@@ -17,6 +17,7 @@ from utils import (
     get_project_root
 )
 from config import DetectionConfig
+from violation_tracker import ViolationTracker
 
 
 class HelmetDetector:
@@ -34,6 +35,7 @@ class HelmetDetector:
         self.logger = logger or logging.getLogger("helmet_detection")
         self.model: Optional[YOLO] = None
         self.seen_vehicles: Set[str] = set()
+        self.tracker = ViolationTracker(logger)
         
         # Class mapping: 0=with helmet, 1=without helmet, 2=rider, 3=number plate
         self.class_map = {
@@ -229,6 +231,13 @@ class HelmetDetector:
             filename = f"{plate_text}_frame{frame_index}.jpg"
             filepath = os.path.join(self.config.output_folder, filename)
             cv2.imwrite(filepath, rider_crop)
+            
+            # Track violation
+            self.tracker.add_violation(
+                plate_text=plate_text,
+                frame_index=frame_index,
+                image_path=str(filepath)
+            )
             
             self.logger.info(f"Saved violation: {plate_text} at frame {frame_index}")
             return plate_text

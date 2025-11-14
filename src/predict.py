@@ -81,6 +81,24 @@ def parse_arguments() -> argparse.Namespace:
         help="Path to log file (optional)"
     )
     
+    parser.add_argument(
+        "--export-csv",
+        type=str,
+        help="Export violations to CSV file"
+    )
+    
+    parser.add_argument(
+        "--export-json",
+        type=str,
+        help="Export violations to JSON file"
+    )
+    
+    parser.add_argument(
+        "--export-report",
+        type=str,
+        help="Export summary report to text file"
+    )
+    
     return parser.parse_args()
 
 
@@ -287,6 +305,17 @@ def main():
             violations = detector.process_frame(frame, result, frame_index)
             total_violations += violations
             
+            # Update timestamps for newly added violations
+            if fps > 0 and violations > 0:
+                # Update only the last N violations (where N = violations found in this frame)
+                recent_violations = detector.tracker.violations[-violations:]
+                for violation in recent_violations:
+                    if violation.get("timestamp_seconds") is None:
+                        violation["timestamp_seconds"] = violation["frame_index"] / fps
+                        violation["timestamp_formatted"] = detector.tracker._format_timestamp(
+                            violation["timestamp_seconds"], violation["frame_index"], fps
+                        )
+            
             frame_index += 1
             pbar.update(1)
             
@@ -305,12 +334,41 @@ def main():
     finally:
         cap.release()
     
+    # Export violations if requested
+    if args.export_csv:
+        csv_path = Path(args.export_csv)
+        if not csv_path.is_absolute():
+            csv_path = get_project_root() / csv_path
+        detector.tracker.export_csv(csv_path)
+    
+    if args.export_json:
+        json_path = Path(args.export_json)
+        if not json_path.is_absolute():
+            json_path = get_project_root() / json_path
+        detector.tracker.export_json(json_path)
+    
+    if args.export_report:
+        report_path = Path(args.export_report)
+        if not report_path.is_absolute():
+            report_path = get_project_root() / report_path
+        detector.tracker.export_summary_report(report_path)
+    
+    # Get statistics
+    stats = detector.tracker.get_statistics()
+    
     # Summary
     logger.info("=" * 50)
     logger.info("Processing complete!")
     logger.info(f"Total frames processed: {frame_index}")
     logger.info(f"Unique violations detected: {len(detector.seen_vehicles)}")
+    logger.info(f"Total violation records: {stats['total_violations']}")
     logger.info(f"Violation images saved to: {config.output_folder}")
+    
+    if stats['plates']:
+        logger.info("\nTop violating plates:")
+        for plate_info in stats['plates'][:5]:  # Top 5
+            logger.info(f"  {plate_info['plate_text']}: {plate_info['count']} violations ({plate_info['percentage']}%)")
+    
     logger.info("=" * 50)
 
 
