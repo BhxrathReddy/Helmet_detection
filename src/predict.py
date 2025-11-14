@@ -1,142 +1,318 @@
-import os
+"""
+Helmet violation detection script with video processing.
+"""
+import argparse
+import sys
+from pathlib import Path
+from typing import Optional, Tuple
 import cv2
-import pytesseract
-from ultralytics import YOLO
+from tqdm import tqdm
 
-# ─── CONFIG ────────────────────────────────────────────────────────────────
-
-# Get the project root directory (parent of src/)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-VIDEO_PATH    = os.path.join(PROJECT_ROOT, "data", "videos", "hd.mp4")
-MODEL_PATH    = os.path.join(PROJECT_ROOT, "models", "best.pt")  # Use your trained model here
-OUTPUT_FOLDER = os.path.join(PROJECT_ROOT, "output", "violations")
-CONF_THRESHOLD = 0.3
-
-# If Tesseract is not on your PATH, set its exe location here:
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-
-# ─── PREPARE ───────────────────────────────────────────────────────────────
-
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-
-# Load model
-model = YOLO(MODEL_PATH)
-
-# Video capture
-cap = cv2.VideoCapture(VIDEO_PATH)
-
-# Map class indices → names
-# 0: with helmet, 1: without helmet, 2: rider, 3: number plate
-class_map = {0: 'with helmet', 1: 'without helmet', 
-             2: 'rider',        3: 'number plate'}
-
-seen_vehicles = set()
-frame_index   = 0
-
-# ─── PROCESS FRAMES ────────────────────────────────────────────────────────
-
-# Stream inference (no display, CPU/GPU auto)
-results = model.predict(
-    show=True,
-    source=VIDEO_PATH,
-    stream=True,
-    conf=CONF_THRESHOLD
+from utils import (
+    setup_logging,
+    get_project_root,
+    find_tesseract_executable,
+    validate_file_path
 )
+from config import DetectionConfig
+from detector import HelmetDetector
 
-for result in results:
-    ret, frame = cap.read()
-    if not ret:
-        break
 
-    # Extract all detected boxes
-    boxes = result.boxes
-    if boxes is None or len(boxes) == 0:
-        frame_index += 1
-        continue
+def parse_arguments() -> argparse.Namespace:
+    """
+    Parse command line arguments.
+    
+    Returns:
+        Parsed arguments
+    """
+    parser = argparse.ArgumentParser(
+        description="Detect helmet violations in video using YOLO",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    parser.add_argument(
+        "--video",
+        type=str,
+        help="Path to input video file"
+    )
+    
+    parser.add_argument(
+        "--model",
+        type=str,
+        help="Path to YOLO model file (.pt)"
+    )
+    
+    parser.add_argument(
+        "--output",
+        type=str,
+        help="Output directory for violation images"
+    )
+    
+    parser.add_argument(
+        "--conf",
+        type=float,
+        default=0.3,
+        help="Confidence threshold for detections"
+    )
+    
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Show video display during processing"
+    )
+    
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to YAML configuration file"
+    )
+    
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level"
+    )
+    
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        help="Path to log file (optional)"
+    )
+    
+    return parser.parse_args()
 
-    # Lists to hold each class's boxes
-    wh_boxes = []   # without helmet
-    rider_boxes = []
-    plate_boxes = []
 
-    # Separate detections by class
-    for i in range(len(boxes.cls)):
-        cls_id = int(boxes.cls[i])
-        coords = boxes.xyxy[i].cpu().numpy().astype(int)  # [x1,y1,x2,y2]
-        if cls_id == 1:
-            wh_boxes.append(coords)
-        elif cls_id == 2:
-            rider_boxes.append(coords)
-        elif cls_id == 3:
-            plate_boxes.append(coords)
+def create_config_from_args(args: argparse.Namespace, project_root: Path) -> DetectionConfig:
+    """
+    Create configuration from command line arguments.
+    
+    Args:
+        args: Parsed command line arguments
+        project_root: Project root directory
+        
+    Returns:
+        DetectionConfig instance
+    """
+    config_dict = {}
+    
+    # Load from YAML if provided
+    if args.config:
+        config_path = Path(args.config)
+        if not config_path.is_absolute():
+            config_path = project_root / config_path
+        
+        if config_path.exists():
+            config = DetectionConfig.from_yaml(config_path, project_root)
+            # Override with command line arguments
+            if args.video:
+                video_path = Path(args.video)
+                if not video_path.is_absolute():
+                    video_path = project_root / video_path
+                config.video_path = video_path
+            if args.model:
+                model_path = Path(args.model)
+                if not model_path.is_absolute():
+                    model_path = project_root / model_path
+                config.model_path = model_path
+            if args.output:
+                output_path = Path(args.output)
+                if not output_path.is_absolute():
+                    output_path = project_root / output_path
+                config.output_folder = output_path
+            if args.conf:
+                config.conf_threshold = args.conf
+            if args.show:
+                config.show_display = True
+            return config
+        else:
+            print(f"Warning: Config file not found: {config_path}", file=sys.stderr)
+    
+    # Create from arguments or defaults
+    video_path = Path(args.video) if args.video else project_root / "data" / "videos" / "hd.mp4"
+    if not video_path.is_absolute():
+        video_path = project_root / video_path
+    
+    model_path = Path(args.model) if args.model else project_root / "models" / "best.pt"
+    if not model_path.is_absolute():
+        model_path = project_root / model_path
+    
+    output_folder = Path(args.output) if args.output else project_root / "output" / "violations"
+    if not output_folder.is_absolute():
+        output_folder = project_root / output_folder
+    
+    return DetectionConfig(
+        video_path=video_path,
+        model_path=model_path,
+        output_folder=output_folder,
+        conf_threshold=args.conf,
+        show_display=args.show,
+    )
 
-    # For each helmet violation, find its rider & plate
-    for wh in wh_boxes:
-        x1,y1,x2,y2 = wh
-        center_wh   = ((x1+x2)//2, (y1+y2)//2)
 
-        # 1) find nearest rider that overlaps significantly with the "without helmet" detection
-        best_rider = None
-        min_dr     = float('inf')
-        for r in rider_boxes:
-            rx1,ry1,rx2,ry2 = r
-            c = ((rx1+rx2)//2, (ry1+ry2)//2)
-            d = (c[0]-center_wh[0])**2 + (c[1]-center_wh[1])**2
+def validate_config(config: DetectionConfig, logger) -> bool:
+    """
+    Validate configuration and required files.
+    
+    Args:
+        config: Detection configuration
+        logger: Logger instance
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    # Validate video file
+    if not validate_file_path(config.video_path, "file"):
+        logger.error(f"Video file not found: {config.video_path}")
+        return False
+    
+    # Validate model file
+    if not validate_file_path(config.model_path, "file"):
+        logger.error(f"Model file not found: {config.model_path}")
+        return False
+    
+    # Create output directory
+    try:
+        config.output_folder.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Failed to create output directory: {str(e)}")
+        return False
+    
+    # Setup Tesseract
+    if config.tesseract_cmd is None:
+        tesseract_path = find_tesseract_executable()
+        if tesseract_path:
+            import pytesseract
+            pytesseract.pytesseract.tesseract_cmd = tesseract_path
+            logger.info(f"Using Tesseract at: {tesseract_path}")
+        else:
+            logger.warning("Tesseract not found in PATH. OCR may fail.")
+    else:
+        import pytesseract
+        pytesseract.pytesseract.tesseract_cmd = config.tesseract_cmd
+        logger.info(f"Using Tesseract at: {config.tesseract_cmd}")
+    
+    return True
+
+
+def get_video_info(video_path: Path) -> Tuple[int, int, float]:
+    """
+    Get video information.
+    
+    Args:
+        video_path: Path to video file
+        
+    Returns:
+        Tuple of (total_frames, fps, duration_seconds)
+    """
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return 0, 0, 0.0
+    
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    duration = total_frames / fps if fps > 0 else 0.0
+    
+    cap.release()
+    return total_frames, fps, duration
+
+
+def main():
+    """Main execution function."""
+    # Parse arguments
+    args = parse_arguments()
+    
+    # Get project root
+    project_root = get_project_root()
+    
+    # Setup logging
+    logger = setup_logging(args.log_level, args.log_file)
+    
+    # Create configuration
+    try:
+        config = create_config_from_args(args, project_root)
+    except Exception as e:
+        logger.error(f"Failed to create configuration: {str(e)}")
+        sys.exit(1)
+    
+    # Validate configuration
+    if not validate_config(config, logger):
+        logger.error("Configuration validation failed")
+        sys.exit(1)
+    
+    # Initialize detector
+    detector = HelmetDetector(config, logger)
+    
+    # Load model
+    if not detector.load_model():
+        logger.error("Failed to load model")
+        sys.exit(1)
+    
+    # Get video info
+    total_frames, fps, duration = get_video_info(config.video_path)
+    logger.info(f"Video: {config.video_path}")
+    logger.info(f"Total frames: {total_frames}, FPS: {fps:.2f}, Duration: {duration:.2f}s")
+    
+    # Open video
+    cap = cv2.VideoCapture(str(config.video_path))
+    if not cap.isOpened():
+        logger.error(f"Failed to open video: {config.video_path}")
+        sys.exit(1)
+    
+    # Process video
+    logger.info("Starting video processing...")
+    frame_index = 0
+    total_violations = 0
+    
+    try:
+        # Create progress bar
+        pbar = tqdm(total=total_frames, desc="Processing frames", unit="frame")
+        
+        # Run inference
+        results = detector.model.predict(
+            source=str(config.video_path),
+            stream=True,
+            conf=config.conf_threshold,
+            show=config.show_display,
+            verbose=False
+        )
+        
+        for result in results:
+            ret, frame = cap.read()
+            if not ret:
+                break
             
-            # Check for significant overlap between "without helmet" and "rider" boxes
-            overlap_x1 = max(x1, rx1)
-            overlap_y1 = max(y1, ry1)
-            overlap_x2 = min(x2, rx2)
-            overlap_y2 = min(y2, ry2)
+            # Process frame
+            violations = detector.process_frame(frame, result, frame_index)
+            total_violations += violations
             
-            if overlap_x1 < overlap_x2 and overlap_y1 < overlap_y2:
-                overlap_area = (overlap_x2 - overlap_x1) * (overlap_y2 - overlap_y1)
-                wh_area = (x2 - x1) * (y2 - y1)
-                overlap_ratio = overlap_area / wh_area if wh_area > 0 else 0
-                
-                # Only consider riders with significant overlap (>30%)
-                if overlap_ratio > 0.3 and d < min_dr:
-                    min_dr, best_rider = d, r
+            frame_index += 1
+            pbar.update(1)
+            
+            # Update progress bar description
+            pbar.set_postfix({
+                'violations': len(detector.seen_vehicles),
+                'frame': frame_index
+            })
+        
+        pbar.close()
+        
+    except KeyboardInterrupt:
+        logger.warning("Processing interrupted by user")
+    except Exception as e:
+        logger.error(f"Error during processing: {str(e)}", exc_info=True)
+    finally:
+        cap.release()
+    
+    # Summary
+    logger.info("=" * 50)
+    logger.info("Processing complete!")
+    logger.info(f"Total frames processed: {frame_index}")
+    logger.info(f"Unique violations detected: {len(detector.seen_vehicles)}")
+    logger.info(f"Violation images saved to: {config.output_folder}")
+    logger.info("=" * 50)
 
-        # 2) find nearest number plate
-        best_plate = None
-        min_dp     = float('inf')
-        for p in plate_boxes:
-            px1,py1,px2,py2 = p
-            c = ((px1+px2)//2, (py1+py2)//2)
-            d = (c[0]-center_wh[0])**2 + (c[1]-center_wh[1])**2
-            if d < min_dp:
-                min_dp, best_plate = d, p
 
-        # proceed only if both found
-        if best_rider is not None and best_plate is not None:
-            # ─── OCR PREPROCESS ───────────────────────────────
-            px1,py1,px2,py2 = best_plate
-            plate_crop = frame[py1:py2, px1:px2]
-
-            # grayscale → equalize → threshold → resize
-            gray   = cv2.cvtColor(plate_crop, cv2.COLOR_BGR2GRAY)
-            eq     = cv2.equalizeHist(gray)
-            _, bin_ = cv2.threshold(eq, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            h,w    = bin_.shape
-            proc   = cv2.resize(bin_, (w*2, h*2), interpolation=cv2.INTER_CUBIC)
-
-            # ─── RUN TESSERACT ────────────────────────────────
-            config = ("--oem 3 --psm 7 "
-                      "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-            raw    = pytesseract.image_to_string(proc, config=config)
-            plate_text = "".join(ch for ch in raw if ch.isalnum()).upper() or None
-
-            # ─── SAVE CROPPED RIDER ────────────────────────────
-            if plate_text and plate_text not in seen_vehicles:
-                seen_vehicles.add(plate_text)
-                rx1,ry1,rx2,ry2 = best_rider
-                rider_crop = frame[ry1:ry2, rx1:rx2]
-                fname = f"{plate_text}_frame{frame_index}.jpg"
-                cv2.imwrite(os.path.join(OUTPUT_FOLDER, fname), rider_crop)
-
-    frame_index += 1
-
-cap.release()
-print(f"Done! Saved {len(seen_vehicles)} violation images to '{OUTPUT_FOLDER}/'")
+if __name__ == "__main__":
+    main()

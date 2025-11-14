@@ -1,5 +1,6 @@
 ultralytics==8.0.20
-opencv-python
-pytesseract
-deep_sort_realtime
-numpy
+opencv-python>=4.8.0
+pytesseract>=0.3.10
+numpy>=1.24.0
+pyyaml>=6.0
+tqdm>=4.66.0

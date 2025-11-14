@@ -1,0 +1,19 @@
+# Inference Configuration for Helmet Detection
+# Paths can be absolute or relative to project root
+
+video_path: "data/videos/hd.mp4"
+model_path: "models/best.pt"
+output_folder: "output/violations"
+
+# Detection settings
+conf_threshold: 0.3  # Confidence threshold for YOLO detections
+show_display: false  # Show video display during processing
+
+# OCR settings
+tesseract_cmd: null  # Auto-detect if null, or specify path like "C:/Program Files/Tesseract-OCR/tesseract.exe"
+
+# Matching settings
+overlap_threshold: 0.3  # Minimum IoU for rider-helmet matching
+min_plate_length: 3     # Minimum characters in license plate
+max_plate_length: 15    # Maximum characters in license plate
+
