@@ -291,15 +291,7 @@ The modular architecture makes it easy to extend:
 - pyyaml>=6.0
 - tqdm>=4.66.0
 
-## License
 
-[Specify your license here]
-
-## Contributing
-
-[Contributing guidelines]
-
-## Acknowledgments
 
 - YOLO models by Ultralytics
 - Tesseract OCR by Google
